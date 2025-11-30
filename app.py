@@ -62,8 +62,7 @@ from datetime import datetime
 load_dotenv()
 
 # Import custom modules - Direct approach
-# Find src directory and ensure it's in path
-src_dir = None
+# Handle both cases: files in src/ subdirectory OR files in same directory as app.py
 
 def is_valid_src_dir(path):
     """Check if a path is a valid src directory with Python files"""
@@ -73,67 +72,77 @@ def is_valid_src_dir(path):
     required = ['agent.py', 'parsers.py', 'database.py']
     return all((path / f).exists() for f in required)
 
-# First, check the standard possible paths
-for possible_path in possible_src_paths:
-    if is_valid_src_dir(possible_path):
-        src_dir = possible_path
-        break
+def has_required_files_in_dir(path):
+    """Check if directory has required Python files directly in it"""
+    if not path.exists() or not path.is_dir():
+        return False
+    required = ['agent.py', 'parsers.py', 'database.py']
+    return all((path / f).exists() for f in required)
 
-# If not found, search more thoroughly
-if not src_dir:
-    for level in range(6):
-        search_path = current_dir
-        for _ in range(level):
-            search_path = search_path.parent
-        # Check if this directory has a src subdirectory
-        test_src = search_path / "src"
-        if is_valid_src_dir(test_src):
-            src_dir = test_src
-            if str(search_path) not in sys.path:
-                sys.path.insert(0, str(search_path))
-            break
-        # Also check if the search_path itself is the src directory (for nested repos)
-        if is_valid_src_dir(search_path / "src" / "src"):
-            src_dir = search_path / "src" / "src"
-            if str(search_path / "src") not in sys.path:
-                sys.path.insert(0, str(search_path / "src"))
-            break
+# First, check if files are in same directory as app.py (Streamlit Cloud case)
+src_dir = None
+use_src_prefix = True  # Default to using src prefix
 
-# Ensure src's parent is in sys.path
-if src_dir and src_dir.exists():
+if has_required_files_in_dir(current_dir):
+    # Files are in the same directory as app.py
+    src_dir = current_dir
+    # We'll import directly without 'src.' prefix
+    use_src_prefix = False
+    # Add current directory to path
+    if str(current_dir) not in sys.path:
+        sys.path.insert(0, str(current_dir))
+else:
+    # Look for src/ subdirectory
+    for possible_path in possible_src_paths:
+        if is_valid_src_dir(possible_path):
+            src_dir = possible_path
+            break
+    
+    # If not found, search more thoroughly
+    if not src_dir:
+        for level in range(6):
+            search_path = current_dir
+            for _ in range(level):
+                search_path = search_path.parent
+            # Check if this directory has a src subdirectory
+            test_src = search_path / "src"
+            if is_valid_src_dir(test_src):
+                src_dir = test_src
+                if str(search_path) not in sys.path:
+                    sys.path.insert(0, str(search_path))
+                break
+            # Also check if the search_path itself is the src directory (for nested repos)
+            if is_valid_src_dir(search_path / "src" / "src"):
+                src_dir = search_path / "src" / "src"
+                if str(search_path / "src") not in sys.path:
+                    sys.path.insert(0, str(search_path / "src"))
+                break
+
+# Ensure src's parent is in sys.path (unless src_dir is current_dir)
+if src_dir and src_dir.exists() and src_dir != current_dir:
     parent_of_src = src_dir.parent.absolute()
     if str(parent_of_src) not in sys.path:
         sys.path.insert(0, str(parent_of_src))
 
 # Try standard import first
 try:
-    from src.agent import ResumeScreeningAgent
-    from src.parsers import parse_resume, extract_resume_sections
-    from src.database import Database
-    from src.api_integrations import GoogleCalendarIntegration, NotionIntegration, GoogleSheetsIntegration
-    from src.utils import export_to_json
+    if use_src_prefix:
+        from src.agent import ResumeScreeningAgent
+        from src.parsers import parse_resume, extract_resume_sections
+        from src.database import Database
+        from src.api_integrations import GoogleCalendarIntegration, NotionIntegration, GoogleSheetsIntegration
+        from src.utils import export_to_json
+    else:
+        # Files are in same directory - import directly
+        from agent import ResumeScreeningAgent
+        from parsers import parse_resume, extract_resume_sections
+        from database import Database
+        from api_integrations import GoogleCalendarIntegration, NotionIntegration, GoogleSheetsIntegration
+        from utils import export_to_json
 except ImportError:
     # Fallback: Load modules directly using importlib
-    # Re-search for src directory more carefully
-    if not src_dir or not src_dir.exists() or not list(src_dir.glob('*.py')):
-        # Try to find src directory by looking for agent.py specifically
-        for level in range(6):
-            search_path = current_dir
-            for _ in range(level):
-                search_path = search_path.parent
-            # Check if this directory itself has src subdirectory
-            test_src = search_path / "src"
-            if test_src.exists() and test_src.is_dir():
-                # Check if it has the required files
-                required_files = ['agent.py', 'parsers.py', 'database.py']
-                if all((test_src / f).exists() for f in required_files):
-                    src_dir = test_src
-                    if str(search_path) not in sys.path:
-                        sys.path.insert(0, str(search_path))
-                    break
-    
     if not src_dir or not src_dir.exists():
-        st.error("❌ Could not find `src/` directory with required files.")
+        st.error("❌ Could not find directory with required files.")
         st.error(f"**Current directory:** {current_dir}")
         st.error(f"**Parent directory:** {parent_dir}")
         st.error(f"**Searched paths:** {[str(p) for p in possible_src_paths]}")
@@ -146,29 +155,36 @@ except ImportError:
     # Verify src_dir has Python files
     py_files = list(src_dir.glob('*.py'))
     if not py_files:
-        st.error(f"❌ `src/` directory found but contains no Python files.")
-        st.error(f"**Src directory:** {src_dir}")
+        st.error(f"❌ Directory found but contains no Python files.")
+        st.error(f"**Directory:** {src_dir}")
         st.error(f"**Contents:** {[f.name for f in src_dir.iterdir()]}")
         st.stop()
     
     import importlib.util
     import types
     
-    # Create src package in sys.modules
-    if 'src' not in sys.modules:
-        src_package = types.ModuleType('src')
-        src_package.__path__ = [str(src_dir)]
-        sys.modules['src'] = src_package
+    # Determine module prefix based on whether we're using src/ or direct imports
+    if use_src_prefix:
+        # Create src package in sys.modules
+        if 'src' not in sys.modules:
+            src_package = types.ModuleType('src')
+            src_package.__path__ = [str(src_dir)]
+            sys.modules['src'] = src_package
+        module_prefix = 'src.'
+    else:
+        # Files are in same directory - no prefix needed
+        module_prefix = ''
     
     def load_module(name, filename):
         filepath = src_dir / filename
         if not filepath.exists():
-            raise ImportError(f"File not found: {filepath}. Src dir: {src_dir}, Files in src: {[f.name for f in src_dir.glob('*.py')]}")
-        spec = importlib.util.spec_from_file_location(f'src.{name}', filepath)
+            raise ImportError(f"File not found: {filepath}. Directory: {src_dir}, Files: {[f.name for f in src_dir.glob('*.py')]}")
+        full_module_name = f'{module_prefix}{name}' if module_prefix else name
+        spec = importlib.util.spec_from_file_location(full_module_name, filepath)
         if spec is None or spec.loader is None:
             raise ImportError(f"Could not load: {filepath}")
         module = importlib.util.module_from_spec(spec)
-        sys.modules[f'src.{name}'] = module
+        sys.modules[full_module_name] = module
         spec.loader.exec_module(module)
         return module
     
@@ -182,11 +198,18 @@ except ImportError:
         load_module('agent', 'agent.py')
         
         # Now import should work
-        from src.agent import ResumeScreeningAgent
-        from src.parsers import parse_resume, extract_resume_sections
-        from src.database import Database
-        from src.api_integrations import GoogleCalendarIntegration, NotionIntegration, GoogleSheetsIntegration
-        from src.utils import export_to_json
+        if use_src_prefix:
+            from src.agent import ResumeScreeningAgent
+            from src.parsers import parse_resume, extract_resume_sections
+            from src.database import Database
+            from src.api_integrations import GoogleCalendarIntegration, NotionIntegration, GoogleSheetsIntegration
+            from src.utils import export_to_json
+        else:
+            from agent import ResumeScreeningAgent
+            from parsers import parse_resume, extract_resume_sections
+            from database import Database
+            from api_integrations import GoogleCalendarIntegration, NotionIntegration, GoogleSheetsIntegration
+            from utils import export_to_json
     except Exception as e:
         st.error("❌ Failed to load modules.")
         st.error(f"**Error:** {str(e)}")
