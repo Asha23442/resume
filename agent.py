@@ -7,8 +7,15 @@ from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.vector_store import VectorStore
-from src.utils import extract_skills, calculate_experience_years, clean_text
+
+# Use relative imports for better compatibility
+try:
+    from .vector_store import VectorStore
+    from .utils import extract_skills, calculate_experience_years, clean_text
+except ImportError:
+    # Fallback for absolute imports
+    from src.vector_store import VectorStore
+    from src.utils import extract_skills, calculate_experience_years, clean_text
 
 
 class ResumeScreeningAgent:

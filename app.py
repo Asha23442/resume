@@ -3,6 +3,27 @@ Resume Screening Agent - Streamlit Application
 """
 import streamlit as st
 import os
+import sys
+from pathlib import Path
+
+# Add the current directory to Python path for Streamlit Cloud compatibility
+current_dir = Path(__file__).parent.absolute()
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+# Also add parent directory in case app is in a subdirectory (Streamlit Cloud)
+parent_dir = current_dir.parent
+if str(parent_dir) not in sys.path:
+    sys.path.insert(0, str(parent_dir))
+
+# Ensure we can find the src module
+src_path = current_dir / "src"
+if not src_path.exists():
+    # Try parent directory
+    src_path = parent_dir / "src"
+    if src_path.exists() and str(parent_dir) not in sys.path:
+        sys.path.insert(0, str(parent_dir))
+
 from dotenv import load_dotenv
 import pandas as pd
 from typing import List, Dict
