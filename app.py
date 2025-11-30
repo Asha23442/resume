@@ -61,7 +61,34 @@ from datetime import datetime
 # Load environment variables
 load_dotenv()
 
-# Import custom modules with comprehensive error handling
+# Import custom modules - Direct approach
+# Find src directory and ensure it's in path
+src_dir = None
+for possible_path in possible_src_paths:
+    if possible_path.exists() and possible_path.is_dir():
+        src_dir = possible_path
+        break
+
+# If still not found, search more thoroughly
+if not src_dir:
+    for level in range(5):
+        search_path = current_dir
+        for _ in range(level):
+            search_path = search_path.parent
+        test_src = search_path / "src"
+        if test_src.exists() and test_src.is_dir():
+            src_dir = test_src
+            if str(search_path) not in sys.path:
+                sys.path.insert(0, str(search_path))
+            break
+
+# Ensure src's parent is in sys.path
+if src_dir and src_dir.exists():
+    parent_of_src = src_dir.parent.absolute()
+    if str(parent_of_src) not in sys.path:
+        sys.path.insert(0, str(parent_of_src))
+
+# Try standard import first
 try:
     from src.agent import ResumeScreeningAgent
     from src.parsers import parse_resume, extract_resume_sections
@@ -69,30 +96,55 @@ try:
     from src.api_integrations import GoogleCalendarIntegration, NotionIntegration, GoogleSheetsIntegration
     from src.utils import export_to_json
 except ImportError:
-    # Fallback: Retry after ensuring paths are set
-    # The path setup above should have already added the necessary paths
-    # This is a safety net
+    # Fallback: Load modules directly using importlib
+    if not src_dir or not src_dir.exists():
+        st.error("❌ Could not find `src/` directory.")
+        st.error(f"**Current directory:** {current_dir}")
+        st.error(f"**Searched paths:** {[str(p) for p in possible_src_paths]}")
+        st.stop()
+    
+    import importlib.util
+    import types
+    
+    # Create src package in sys.modules
+    if 'src' not in sys.modules:
+        src_package = types.ModuleType('src')
+        src_package.__path__ = [str(src_dir)]
+        sys.modules['src'] = src_package
+    
+    def load_module(name, filename):
+        filepath = src_dir / filename
+        if not filepath.exists():
+            raise ImportError(f"File not found: {filepath}")
+        spec = importlib.util.spec_from_file_location(f'src.{name}', filepath)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load: {filepath}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[f'src.{name}'] = module
+        spec.loader.exec_module(module)
+        return module
+    
     try:
+        # Load in dependency order
+        load_module('vector_store', 'vector_store.py')
+        load_module('utils', 'utils.py')
+        load_module('parsers', 'parsers.py')
+        load_module('database', 'database.py')
+        load_module('api_integrations', 'api_integrations.py')
+        load_module('agent', 'agent.py')
+        
+        # Now import should work
         from src.agent import ResumeScreeningAgent
         from src.parsers import parse_resume, extract_resume_sections
         from src.database import Database
         from src.api_integrations import GoogleCalendarIntegration, NotionIntegration, GoogleSheetsIntegration
         from src.utils import export_to_json
-    except ImportError as e:
-        st.error("❌ Failed to import required modules.")
+    except Exception as e:
+        st.error("❌ Failed to load modules.")
         st.error(f"**Error:** {str(e)}")
-        st.info("""
-        **Troubleshooting:**
-        1. Ensure the `src/` directory exists in your repository
-        2. Check that all files in `src/` are present:
-           - `agent.py`
-           - `parsers.py`
-           - `database.py`
-           - `api_integrations.py`
-           - `utils.py`
-           - `vector_store.py`
-        3. Verify your repository structure matches the expected layout
-        """)
+        st.error(f"**Src directory:** {src_dir}")
+        if src_dir and src_dir.exists():
+            st.error(f"**Files found:** {[f.name for f in src_dir.glob('*.py')]}")
         st.stop()
 
 # Page configuration
