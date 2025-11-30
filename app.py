@@ -64,22 +64,39 @@ load_dotenv()
 # Import custom modules - Direct approach
 # Find src directory and ensure it's in path
 src_dir = None
+
+def is_valid_src_dir(path):
+    """Check if a path is a valid src directory with Python files"""
+    if not path.exists() or not path.is_dir():
+        return False
+    # Check for required files
+    required = ['agent.py', 'parsers.py', 'database.py']
+    return all((path / f).exists() for f in required)
+
+# First, check the standard possible paths
 for possible_path in possible_src_paths:
-    if possible_path.exists() and possible_path.is_dir():
+    if is_valid_src_dir(possible_path):
         src_dir = possible_path
         break
 
-# If still not found, search more thoroughly
+# If not found, search more thoroughly
 if not src_dir:
-    for level in range(5):
+    for level in range(6):
         search_path = current_dir
         for _ in range(level):
             search_path = search_path.parent
+        # Check if this directory has a src subdirectory
         test_src = search_path / "src"
-        if test_src.exists() and test_src.is_dir():
+        if is_valid_src_dir(test_src):
             src_dir = test_src
             if str(search_path) not in sys.path:
                 sys.path.insert(0, str(search_path))
+            break
+        # Also check if the search_path itself is the src directory (for nested repos)
+        if is_valid_src_dir(search_path / "src" / "src"):
+            src_dir = search_path / "src" / "src"
+            if str(search_path / "src") not in sys.path:
+                sys.path.insert(0, str(search_path / "src"))
             break
 
 # Ensure src's parent is in sys.path
@@ -97,10 +114,41 @@ try:
     from src.utils import export_to_json
 except ImportError:
     # Fallback: Load modules directly using importlib
+    # Re-search for src directory more carefully
+    if not src_dir or not src_dir.exists() or not list(src_dir.glob('*.py')):
+        # Try to find src directory by looking for agent.py specifically
+        for level in range(6):
+            search_path = current_dir
+            for _ in range(level):
+                search_path = search_path.parent
+            # Check if this directory itself has src subdirectory
+            test_src = search_path / "src"
+            if test_src.exists() and test_src.is_dir():
+                # Check if it has the required files
+                required_files = ['agent.py', 'parsers.py', 'database.py']
+                if all((test_src / f).exists() for f in required_files):
+                    src_dir = test_src
+                    if str(search_path) not in sys.path:
+                        sys.path.insert(0, str(search_path))
+                    break
+    
     if not src_dir or not src_dir.exists():
-        st.error("❌ Could not find `src/` directory.")
+        st.error("❌ Could not find `src/` directory with required files.")
         st.error(f"**Current directory:** {current_dir}")
+        st.error(f"**Parent directory:** {parent_dir}")
         st.error(f"**Searched paths:** {[str(p) for p in possible_src_paths]}")
+        # Show what directories exist
+        if current_dir.exists():
+            st.error(f"**Files in current dir:** {[f.name for f in current_dir.iterdir() if f.is_file()][:10]}")
+            st.error(f"**Dirs in current dir:** {[f.name for f in current_dir.iterdir() if f.is_dir()][:10]}")
+        st.stop()
+    
+    # Verify src_dir has Python files
+    py_files = list(src_dir.glob('*.py'))
+    if not py_files:
+        st.error(f"❌ `src/` directory found but contains no Python files.")
+        st.error(f"**Src directory:** {src_dir}")
+        st.error(f"**Contents:** {[f.name for f in src_dir.iterdir()]}")
         st.stop()
     
     import importlib.util
@@ -115,7 +163,7 @@ except ImportError:
     def load_module(name, filename):
         filepath = src_dir / filename
         if not filepath.exists():
-            raise ImportError(f"File not found: {filepath}")
+            raise ImportError(f"File not found: {filepath}. Src dir: {src_dir}, Files in src: {[f.name for f in src_dir.glob('*.py')]}")
         spec = importlib.util.spec_from_file_location(f'src.{name}', filepath)
         if spec is None or spec.loader is None:
             raise ImportError(f"Could not load: {filepath}")
@@ -144,7 +192,8 @@ except ImportError:
         st.error(f"**Error:** {str(e)}")
         st.error(f"**Src directory:** {src_dir}")
         if src_dir and src_dir.exists():
-            st.error(f"**Files found:** {[f.name for f in src_dir.glob('*.py')]}")
+            st.error(f"**Python files found:** {[f.name for f in src_dir.glob('*.py')]}")
+            st.error(f"**All files:** {[f.name for f in src_dir.iterdir()]}")
         st.stop()
 
 # Page configuration
